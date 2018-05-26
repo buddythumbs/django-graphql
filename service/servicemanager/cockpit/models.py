@@ -3,15 +3,34 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import User, AbstractUser
 from django.contrib.postgres.fields import JSONField
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+class ServiceNotification(models.Model):
+    """ Container for tasks, action plans and service orders """
+    description = models.CharField(max_length=150)
+    create_date = models.DateTimeField(auto_now_add=True)
+    creator = models.ForeignKey('Engineer',null=True, blank=True, on_delete=models.SET_NULL)
+    category = models.ForeignKey('Category',null=True, on_delete=models.SET_NULL)
+    owner = models.ManyToManyField('Engineer',related_name="ownednotifications")
+    service_order = models.CharField(max_length=10, null=True, blank=True)
+    related_task = models.ManyToManyField("Task", blank=True)
+    related_action_plan = models.ManyToManyField("ActionPlan", blank=True)
+    high_priority =models.NullBooleanField(default=False,null=True, blank=True)
+    status = models.CharField(max_length=30, null=True, blank=True, default="todo")
+    tasks = models.ManyToManyField('Task',related_name="service_notification",blank=True)
+
+    def __str__(self):
+        return self.description
 
 class Task(models.Model):
     description = models.TextField()
     create_date = models.DateTimeField(auto_now_add=True)
-    creator = models.ForeignKey('Engineer',null=True, blank=True, on_delete=models.SET_NULL)
+    creator = models.ForeignKey('Engineer',related_name="createdtasks",null=True, blank=True, on_delete=models.SET_NULL)
     due_date = models.DateTimeField()
     duration = models.DecimalField(max_digits=4, decimal_places=1, default=0.5)
     category = models.ForeignKey('Category',null=True, on_delete=models.SET_NULL)
-    owner = models.ManyToManyField('Engineer',related_name="ownedtasks")
+    owner = models.ForeignKey('Engineer',related_name="ownedtasks",null=True, blank=True, on_delete=models.SET_NULL)
     service_order = models.CharField(max_length=10, null=True, blank=True)
     related_task = models.ForeignKey("Task",null=True, blank=True, on_delete=models.SET_NULL)
     high_priority =models.NullBooleanField(default=False,null=True, blank=True)
@@ -24,22 +43,10 @@ class Task(models.Model):
     def due_soon(self):
         return self.due_date <= timezone.now() + datetime.timedelta(days=1)
 
-class ServiceNotification(models.Model):
-    """ Container for tasks, action plans and service orders """
-    description = models.CharField(max_length=150)
-    create_date = models.DateTimeField(auto_now_add=True)
-    creator = models.ForeignKey('Engineer',null=True, blank=True, on_delete=models.SET_NULL)
-    category = models.ForeignKey('Category',null=True, on_delete=models.SET_NULL)
-    owner = models.ManyToManyField('Engineer',related_name="ownednotifications")
-    service_order = models.CharField(max_length=10, null=True, blank=True)
-    related_task = models.ManyToManyField("Task",null=True, blank=True)
-    related_action_plan = models.ManyToManyField("ActionPlan",null=True, blank=True)
-    high_priority =models.NullBooleanField(default=False,null=True, blank=True)
-    status = models.CharField(max_length=30, null=True, blank=True, default="todo")
-
-
-    def __str__(self):
-        return self.description
+    def save(self, **kwargs):
+        if not self.due_date:
+            self.due_date = timezone.now() + datetime.timedelta(days=2) 
+        super(Task, self).save()  
 
 class KnownIssue(models.Model):
     description = models.TextField()
@@ -51,14 +58,15 @@ class KnownIssue(models.Model):
     def __str__(self):
         return self.description
 
-class Engineer(models.Model):
+class Engineer(AbstractUser):
     abbreviation = models.CharField(max_length=4, blank=True)
     shift = models.ForeignKey('Shift',null=True, on_delete=models.SET_NULL, blank=True)
     vacation_hours = models.DecimalField(max_digits=5, decimal_places=2,default=195)
     sap = models.CharField(max_length=10,null=True, blank=True)
+    competencies = models.ManyToManyField('Competency',related_name="capable_engineers",blank=True)
 
     def __str__(self):
-        return self.abbreviation 
+        return "{} ({})".format(self.username,self.abbreviation)  
 
 class ToolOwner(models.Model):
     firstname = models.CharField(max_length=100)
@@ -121,3 +129,10 @@ class ActionPlan(models.Model):
 
     def __str__(self):
         return self.description
+
+class Competency(models.Model):
+    description = models.CharField(max_length=50)
+    owners = models.ManyToManyField('Engineer',related_name="owned_competencies")
+
+    def __str__(self):
+        return "{}".format(self.description)
